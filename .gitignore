@@ -1,0 +1,19 @@
+# Byte-compiled / cached files
+__pycache__/
+*.py[cod]
+*.class
+
+# Virtual environments
+venv/
+.env
+
+# OS files
+.DS_Store
+
+# Local DB / artifacts
+*.db
+*.sqlite
+*.sqlite3
+
+# Images generated during tests
+pyramid_test.png
