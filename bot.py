@@ -30,6 +30,58 @@ WRONG_PENALTY = 1
 EARLY_END_ON_ALL_SOLVED = False
 # ------------------------------------
 
+# ------- 常用文字模板 -------
+MSG_NO_ACTIVE_GAME = "目前沒有進行中的題目。"
+MSG_GAME_IN_PROGRESS = "目前已有題目在進行中，请先 /end 或等待結束。"
+MSG_SESSION_COMPLETE = "賽局已達到設定回合數，請 /endgame 結算或 /newgame 重新開始。"
+MSG_NO_ACTIVE_SESSION = "目前沒有進行中的賽局。"
+MSG_NO_SCORES = "目前還沒有分數紀錄。"
+MSG_SYNC_ENDED = "已同步結束當前題目。"
+MSG_TERMINATED = "本題已被終止。"
+MSG_ALL_SOLVED_EARLY = "✅ 本題所有可行組合皆已被答出，提前結束！"
+MSG_TIME_UP = "時間到！本題結束。"
+MSG_ONE_MIN_REMAINING = "⏰ 剩 1 分鐘！請盡快提交你的答案（回覆三個字母 A-J）。"
+
+# 答題相關訊息
+MSG_INVALID_ADJACENT = "❌ {name}，答案不合規則：需為直線相鄰三點。"
+MSG_WRONG_ANSWER = "❌ {name}，這三個數字無法組成目標，已扣 {penalty} 分（總分：{score}）。"
+MSG_CORRECT_ANSWER = "✅ {name} 答對！獲得 {points} 分（總分：{score}）\n已解組合 {solved}/{total}"
+MSG_ALREADY_SCORED = "{name} 已以此組合得過分，這次不再加分。試試不同的相鄰組合！"
+MSG_ALREADY_TAKEN = "答對，但此組合已有他人搶先得分。試試不同的相鄰組合！"
+
+# 指令說明
+CMD_HELP_TEXT = (
+    "/new - 出一題（若已有題目請先 /end或等待結束）\n"
+    "/newgame N - 開新賽局，共 N 題（預設 5）\n"
+    "/end - 強制結束本題（會 reveal 解答）\n"
+    "/endgame - 提前結束賽局並結算\n"
+    "/score - 查看自己分數 /leaderboard - 排行榜\n\n"
+    "作答：回覆三個字母 A-J（直線相鄰，例：ABD）。\n"
+    "規則：僅允許直線相鄰三點，四則運算可得目標即算答對。"
+)
+
+# 題目相關文字
+QUESTION_PREFIX = "🔢 題目：目標 {target}"
+QUESTION_WITH_PYRAMID = "🔢 題目：目標 {target}\n{pyramid}"
+QUESTION_INSTRUCTION = "作答：直接回覆三個字母 A-J（例：ABD）。"
+QUESTION_RULE = "規則：只能選『直線相鄰的三個數字』（依 A-J 標籤）。"
+QUESTION_HINT = "提示：本題共有 {count} 組可行解。"
+QUESTION_SOLUTIONS = "所有可行解：\n{solutions}"
+QUESTION_LEADERBOARD = "當前排行榜：\n{leaderboard}"
+
+# 排行榜相關
+LEADERBOARD_HEADER = "🏆 排行榜"
+FINAL_LEADERBOARD_HEADER = "🏁 本回合最終排行榜"
+LEADERBOARD_ENTRY = "{rank}. {username} — {score}"
+
+# 計分說明
+SCORING_RULES = (
+    "計分：首位答對 +{first}，後續答對 +{later}；"
+    "若合規但算不到目標，扣 {penalty} 分。不合規不扣分。\n"
+    "同一組（如 ABD）只有最先者得分；你可嘗試不同直線三點組合。\n\n"
+    "指令：/new 出題、/end 結束本題、/endgame 結算賽局。"
+)
+
 # 用來存 Chat 的 schedule task，以便中途取消
 chat_tasks: Dict[int, asyncio.Task] = {}
 chat_reminder_tasks: Dict[int, asyncio.Task] = {}
@@ -72,12 +124,12 @@ async def engine_schedule_end(chat_id:int, delay:int, context: ContextTypes.DEFA
         await end_game_db(chat_id)
         sols = build_all_solutions_text(chat_id)
         rank_rows = await get_leaderboard(chat_id, limit=10)
-        rank_text = "\n".join([f"{i+1}. {u} — {s}" for i,(u,s) in enumerate(rank_rows)]) if rank_rows else "目前還沒有分數紀錄。"
+        rank_text = "\n".join([LEADERBOARD_ENTRY.format(rank=i+1, username=u, score=s) for i,(u,s) in enumerate(rank_rows)]) if rank_rows else MSG_NO_SCORES
         msg = (
-            f"時間到！本題結束。\n"
+            f"{MSG_TIME_UP}\n"
             f"題目：數字 {game['numbers']}，目標 {game['target']}\n"
-            f"所有可行解：\n{sols}\n\n"
-            f"當前排行榜：\n{rank_text}"
+            f"{QUESTION_SOLUTIONS.format(solutions=sols)}\n\n"
+            f"{QUESTION_LEADERBOARD.format(leaderboard=rank_text)}"
         )
         await context.bot.send_message(chat_id=chat_id, text=msg)
     except asyncio.CancelledError:
@@ -154,7 +206,7 @@ class EngineFacade:
         return numbers, target, solutions_count
 
     @staticmethod
-    async def finish_round_with_summary(chat_id:int, context: ContextTypes.DEFAULT_TYPE, prefix:str="時間到！本題結束。") -> None:
+    async def finish_round_with_summary(chat_id:int, context: ContextTypes.DEFAULT_TYPE, prefix:str=MSG_TIME_UP) -> None:
         await end_game_db(chat_id)
         await engine_cancel_timers(chat_id)
         game = await get_game(chat_id)
@@ -162,12 +214,12 @@ class EngineFacade:
             return
         sols = build_all_solutions_text(chat_id)
         rank_rows = await get_leaderboard(chat_id, limit=10)
-        rank_text = "\n".join([f"{i+1}. {u} — {s}" for i,(u,s) in enumerate(rank_rows)]) if rank_rows else "目前還沒有分數紀錄。"
+        rank_text = "\n".join([LEADERBOARD_ENTRY.format(rank=i+1, username=u, score=s) for i,(u,s) in enumerate(rank_rows)]) if rank_rows else MSG_NO_SCORES
         msg = (
             f"{prefix}\n"
             f"題目：數字 {game['numbers']}，目標 {game['target']}\n"
-            f"所有可行解：\n{sols}\n\n"
-            f"當前排行榜：\n{rank_text}"
+            f"{QUESTION_SOLUTIONS.format(solutions=sols)}\n\n"
+            f"{QUESTION_LEADERBOARD.format(leaderboard=rank_text)}"
         )
         await context.bot.send_message(chat_id=chat_id, text=msg)
 
@@ -185,7 +237,7 @@ class EngineFacade:
         idxs = [ord(ch) - ord('A') for ch in labels]
         if tuple(sorted(idxs)) not in PRECOMPUTED_TRIPLETS_SORTED:
             await add_answer_record(chat_id, user.id, ''.join(sorted(labels)), 0)
-            await context.bot.send_message(chat_id=chat_id, text=f"❌ {user.first_name}，答案不合規則：需為直線相鄰三點。")
+            await context.bot.send_message(chat_id=chat_id, text=MSG_INVALID_ADJACENT.format(name=user.first_name))
             return
         cache = ENGINE.get_valid_combos(chat_id)
         key_label = ''.join(chr(ord('A') + i) for i in idxs)
@@ -197,71 +249,49 @@ class EngineFacade:
         if sol is None:
             await add_answer_record(chat_id, user.id, ''.join(sorted(labels)), 0)
             newscore = await add_score(chat_id, user.id, user.first_name, -WRONG_PENALTY)
-            await context.bot.send_message(chat_id=chat_id, text=f"❌ {user.first_name}，這三個數字無法組成目標，已扣 {WRONG_PENALTY} 分（總分：{newscore}）。")
+            await context.bot.send_message(chat_id=chat_id, text=MSG_WRONG_ANSWER.format(name=user.first_name, penalty=WRONG_PENALTY, score=newscore))
             return
         combo_key = ''.join(sorted(labels))
         if await user_already_correct_combo(chat_id, user.id, combo_key):
             await add_answer_record(chat_id, user.id, combo_key, 1)
-            await context.bot.send_message(chat_id=chat_id, text=f"{user.first_name} 已以此組合得過分，這次不再加分。試試不同的相鄰組合！")
+            await context.bot.send_message(chat_id=chat_id, text=MSG_ALREADY_SCORED.format(name=user.first_name))
             return
         first_solver = await get_combo_first_solver(chat_id, combo_key)
         if first_solver is not None and first_solver != user.id:
             await add_answer_record(chat_id, user.id, combo_key, 1)
-            await context.bot.send_message(chat_id=chat_id, text="答對，但此組合已有他人搶先得分。試試不同的相鄰組合！")
+            await context.bot.send_message(chat_id=chat_id, text=MSG_ALREADY_TAKEN)
             return
         correct_count = await count_correct_answers(chat_id)
         points = FIRST_CORRECT_POINTS if correct_count == 0 else LATER_CORRECT_POINTS
         newscore = await add_score(chat_id, user.id, user.first_name, points)
         await add_answer_record(chat_id, user.id, combo_key, 1)
         solved_count, total_needed = ENGINE.add_solved_combo(chat_id, combo_key)
-        await context.bot.send_message(chat_id=chat_id, text=f"✅ {user.first_name} 答對！獲得 {points} 分（總分：{newscore}）\n已解組合 {solved_count}/{total_needed}")
+        await context.bot.send_message(chat_id=chat_id, text=MSG_CORRECT_ANSWER.format(name=user.first_name, points=points, score=newscore, solved=solved_count, total=total_needed))
         if ENGINE.all_solved(chat_id):
-            await EngineFacade.finish_round_with_summary(chat_id, context, prefix="✅ 本題所有可行組合皆已被答出，提前結束！")
-
-# ------- 文案集中定義（避免重複硬編字串） -------
-INSTR_EXAMPLE = "作答：回覆三個字母 A-J（直線相鄰，例：ABD）。"
-RULE_BRIEF = "規則：僅允許直線相鄰三點，四則運算可得目標即算答對。"
+            await EngineFacade.finish_round_with_summary(chat_id, context, prefix=MSG_ALL_SOLVED_EARLY)
 
 class MessageBuilder:
     @staticmethod
     def help_text() -> str:
-        return (
-            "/new - 出一題（若已有題目請先 /end或等待結束）\n"
-            "/newgame N - 開新賽局，共 N 題（預設 5）\n"
-            "/end - 強制結束本題（會 reveal 解答）\n"
-            "/endgame - 提前結束賽局並結算\n"
-            "/score - 查看自己分數 /leaderboard - 排行榜\n\n"
-            f"{INSTR_EXAMPLE}\n"
-            f"{RULE_BRIEF}"
-        )
+        return CMD_HELP_TEXT
 
     @staticmethod
     def caption_for_image(target:int, solutions_count:int) -> str:
-        return (
-            f"🔢 目標 {target}｜可行解 {solutions_count} 組\n"
-            f"{INSTR_EXAMPLE}"
-        )
+        return f"🔢 目標 {target}｜可行解 {solutions_count} 組\n{QUESTION_INSTRUCTION}"
 
     @staticmethod
     def message_for_text(numbers:List[int], target:int, solutions_count:int) -> str:
         pyramid = build_pyramid_text(numbers)
-        return (
-            f"🔢 題目：目標 {target}\n{pyramid}\n"
-            f"{INSTR_EXAMPLE}\n"
-            f"可行解：{solutions_count} 組"
-        )
+        return f"{QUESTION_WITH_PYRAMID.format(target=target, pyramid=pyramid)}\n{QUESTION_INSTRUCTION}\n可行解：{solutions_count} 組"
 
     @staticmethod
     def newgame_intro(total_rounds:int) -> str:
         return (
             f"🎮 新賽局開始（共 {total_rounds} 題）\n"
             f"每題限時 {TIME_LIMIT_DEFAULT} 秒。\n\n"
-            f"{INSTR_EXAMPLE}\n"
-            f"{RULE_BRIEF}\n\n"
-            f"計分：首位答對 +{FIRST_CORRECT_POINTS}，後續答對 +{LATER_CORRECT_POINTS}；"
-            f"若合規但算不到目標，扣 {WRONG_PENALTY} 分。不合規不扣分。\n"
-            f"同一組（如 ABD）只有最先者得分；你可嘗試不同直線三點組合。\n\n"
-            f"指令：/new 出題、/end 結束本題、/endgame 結算賽局。"
+            f"{QUESTION_INSTRUCTION}\n"
+            f"規則：僅允許直線相鄰三點，四則運算可得目標即算答對。\n\n"
+            f"{SCORING_RULES.format(first=FIRST_CORRECT_POINTS, later=LATER_CORRECT_POINTS, penalty=WRONG_PENALTY)}"
         )
 
 def build_all_solutions_text(chat_id:int) -> str:
@@ -454,10 +484,10 @@ async def end_session(chat_id:int):
 async def get_leaderboard_text(chat_id:int) -> str:
     rows = await get_leaderboard(chat_id, limit=10)
     if not rows:
-        return "目前還沒有分數紀錄。"
-    text = "🏁 本回合最終排行榜\n"
+        return MSG_NO_SCORES
+    text = f"{FINAL_LEADERBOARD_HEADER}\n"
     for i, (username, score) in enumerate(rows, start=1):
-        text += f"{i}. {username} — {score}\n"
+        text += f"{LEADERBOARD_ENTRY.format(rank=i, username=username, score=score)}\n"
     return text
 
 async def get_solved_combo_keys(chat_id:int) -> set:
@@ -801,18 +831,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("哈囉，我是數字計算遊戲 bot！/new 出題，/score 看你的分數，/leaderboard 看排行榜，/help 了解更多。")
 
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    txt = (
-        "/new - 出一題（若已有題目請先 /end或等待結束）\n"
-        "/newgame N - 開始一個新賽局，總共 N 題並結算分數\n"
-        "/end - 強制結束本題（會 reveal 解答）\n"
-        "/endgame - 提前結束賽局並結算分數\n"
-        "/score - 查看自己分數\n"
-        "/leaderboard - 本群排行榜\n\n"
-        "答題方式：直接在群內回覆三個字母（A-J），例如 ABD。\n"
-        "規則（新版）：從金字塔 10 個數字中，只能挑選『直線相鄰的三個數字』（依 A-J 索引）做四則運算，\n"
-        "          必須剛好使用 3 個（以字母表示），若該三數可用 + - * / 與括號組成目標值，即為答對。"
-    )
-    await update.message.reply_text(txt)
+    await update.message.reply_text(CMD_HELP_TEXT)
 
 async def cmd_new(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
@@ -821,12 +840,12 @@ async def cmd_new(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if sess and sess["active"]:
         # 若當前回合已達總回合則拒絕出新題
         if sess["current_round"] >= sess["total_rounds"]:
-            await update.message.reply_text("賽局已達到設定回合數，請 /endgame 結算或 /newgame 重新開始。")
+            await update.message.reply_text(MSG_SESSION_COMPLETE)
             return
     # 檢查是否已有進行中題目
     game = await get_game(chat_id)
     if game and game["active"]:
-        await update.message.reply_text("目前已有題目在進行中，请先 /end 或等待結束。")
+        await update.message.reply_text(MSG_GAME_IN_PROGRESS)
         return
     # 產生題目
     numbers, target, solution = generate_solvable_puzzle(num_count=NUM_COUNT)
@@ -869,10 +888,10 @@ async def cmd_new(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 chat_id=chat_id,
                 photo=InputFile(bio, filename="pyramid.png"),
                 caption=(
-                    f"🔢 題目：目標 {target}\n"
-                    f"作答：直接回覆三個字母 A-J（例：ABD）。\n"
-                    f"規則：只能選『直線相鄰的三個數字』（依圖上 A-J 標籤）。\n"
-                    f"提示：本題共有 {solutions_count} 組可行解。"
+                    f"{QUESTION_PREFIX.format(target=target)}\n"
+                    f"{QUESTION_INSTRUCTION}\n"
+                    f"{QUESTION_RULE}\n"
+                    f"{QUESTION_HINT.format(count=solutions_count)}"
                 )
             )
         except Exception as e:
@@ -880,19 +899,19 @@ async def cmd_new(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # 發送文字版金字塔備援
             text_pyr = build_pyramid_text(numbers)
             await update.message.reply_text(
-                f"🔢 題目：目標 {target}\n{text_pyr}\n"
-                f"作答：直接回覆三個字母 A-J（例：ABD）。\n"
-                f"規則：只能選『直線相鄰的三個數字』（依 A-J 標籤）。\n"
-                f"提示：本題共有 {solutions_count} 組可行解。"
+                f"{QUESTION_WITH_PYRAMID.format(target=target, pyramid=text_pyr)}\n"
+                f"{QUESTION_INSTRUCTION}\n"
+                f"{QUESTION_RULE}\n"
+                f"{QUESTION_HINT.format(count=solutions_count)}"
             )
     else:
         # 沒圖像，直接送文字金字塔
         text_pyr = build_pyramid_text(numbers)
         await update.message.reply_text(
-            f"🔢 題目：目標 {target}\n{text_pyr}\n"
-            f"作答：直接回覆三個字母 A-J（例：ABD）。\n"
-            f"規則：只能選『直線相鄰的三個數字』（依 A-J 標籤）。\n"
-            f"提示：本題共有 {solutions_count} 組可行解。"
+            f"{QUESTION_WITH_PYRAMID.format(target=target, pyramid=text_pyr)}\n"
+            f"{QUESTION_INSTRUCTION}\n"
+            f"{QUESTION_RULE}\n"
+            f"{QUESTION_HINT.format(count=solutions_count)}"
         )
     # 設定排程
     engine_set_timer(chat_id, context)
@@ -907,12 +926,12 @@ async def schedule_end(chat_id:int, delay:int, context: ContextTypes.DEFAULT_TYP
         # reveal solutions
         sols = build_all_solutions_text(chat_id)
         rank_rows = await get_leaderboard(chat_id, limit=10)
-        rank_text = "\n".join([f"{i+1}. {u} — {s}" for i,(u,s) in enumerate(rank_rows)]) if rank_rows else "目前還沒有分數紀錄。"
+        rank_text = "\n".join([LEADERBOARD_ENTRY.format(rank=i+1, username=u, score=s) for i,(u,s) in enumerate(rank_rows)]) if rank_rows else MSG_NO_SCORES
         msg = (
-            f"時間到！本題結束。\n"
+            f"{MSG_TIME_UP}\n"
             f"題目：數字 {game['numbers']}，目標 {game['target']}\n"
-            f"所有可行解：\n{sols}\n\n"
-            f"當前排行榜：\n{rank_text}"
+            f"{QUESTION_SOLUTIONS.format(solutions=sols)}\n\n"
+            f"{QUESTION_LEADERBOARD.format(leaderboard=rank_text)}"
         )
         await context.bot.send_message(chat_id=chat_id, text=msg)
     except asyncio.CancelledError:
@@ -923,12 +942,12 @@ async def cmd_end(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     game = await get_game(chat_id)
     if not game or not game["active"]:
-        await update.message.reply_text("目前沒有進行中的題目。")
+        await update.message.reply_text(MSG_NO_ACTIVE_GAME)
         return
     await end_game_db(chat_id)
     await engine_cancel_timers(chat_id)
     sol = game.get("solution") or "（無可用範例）"
-    await update.message.reply_text(f"本題已被終止。\n題目：數字 {game['numbers']}，目標 {game['target']}\n示範解：`{sol}`")
+    await update.message.reply_text(f"{MSG_TERMINATED}\n題目：數字 {game['numbers']}，目標 {game['target']}\n示範解：`{sol}`")
 
 async def cmd_newgame(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
@@ -947,14 +966,14 @@ async def cmd_endgame(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     sess = await get_session(chat_id)
     if not sess or not sess["active"]:
-        await update.message.reply_text("目前沒有進行中的賽局。")
+        await update.message.reply_text(MSG_NO_ACTIVE_SESSION)
         return
     # 確認本聊天室當前題目已結束
     game = await get_game(chat_id)
     if game and game["active"]:
         await end_game_db(chat_id)
         await engine_cancel_timers(chat_id)
-        await update.message.reply_text("已同步結束當前題目。")
+        await update.message.reply_text(MSG_SYNC_ENDED)
     await end_session(chat_id)
     text = await get_leaderboard_text(chat_id)
     await update.message.reply_text(text)
@@ -965,7 +984,7 @@ async def schedule_reminder(chat_id:int, delay:int, context: ContextTypes.DEFAUL
         game = await get_game(chat_id)
         if not game or not game["active"]:
             return
-        await context.bot.send_message(chat_id=chat_id, text="⏰ 剩 1 分鐘！請盡快提交你的答案（回覆三個字母 A-J）。")
+        await context.bot.send_message(chat_id=chat_id, text=MSG_ONE_MIN_REMAINING)
     except asyncio.CancelledError:
         return
 
@@ -979,11 +998,11 @@ async def cmd_leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     rows = await get_leaderboard(chat_id, limit=10)
     if not rows:
-        await update.message.reply_text("目前還沒有分數紀錄。")
+        await update.message.reply_text(MSG_NO_SCORES)
         return
-    text = "🏆 排行榜\n"
+    text = f"{LEADERBOARD_HEADER}\n"
     for i, (username, score) in enumerate(rows, start=1):
-        text += f"{i}. {username} — {score}\n"
+        text += f"{LEADERBOARD_ENTRY.format(rank=i, username=username, score=score)}\n"
     await update.message.reply_text(text)
 
 # 處理群組內的答案（非命令的文字）
